@@ -3,15 +3,14 @@
  
  class gyroturn {
   private:
-    int deg = 0;
-    int axelerometer_update(float ax, float ay, float az, float gx, float gy, float gz, float deltat);
+   int deg = 0;
   public:
    gyroturn();
    void begin();   
    int gotodeg(int deg); //turn to degree
    float getTemp();
-   int getYaw();
-
+   int getYaw(); //return the Yaw angle
+   void gyroreset();
   
 
  };

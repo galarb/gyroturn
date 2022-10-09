@@ -10,7 +10,8 @@ myturn.begin();
 void loop() { 
   //myturn.run();
   
-  //myturn.gotodeg(90);
-  Serial.println(myturn.getYaw());
+  myturn.gotodeg(90);
+  //Serial.println(myturn.getYaw());
    delay(1000);
+   
  }
