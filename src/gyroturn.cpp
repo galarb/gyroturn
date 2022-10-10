@@ -1,9 +1,8 @@
-#include "HardwareSerial.h"
 /*
 
 
                    Robot Turning function to specific Degree 
-												Software for Arduino
+											PID	Software Control for Arduino
 			            			 	 Using Gyro MPU-6050
                
       by Gal Arbel
@@ -18,12 +17,21 @@
 #include <Wire.h>
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
-#if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
-    #include "Wire.h"
-#endif
+#include "LiquidCrystal_I2C.h"
+#include "HardwareSerial.h"
+
+unsigned long currentTime, previousTime;
+double elapsedTime;
+double error;
+double lastError;
+double input, output;
+double cumError, rateError;
+double kp = 1.5;
+double ki = 0; //max 0.00185
+double kd = 100;
 
 MPU6050 mpu;
-
+LiquidCrystal_I2C lcd(0x27,16,2);
 
 // uncomment "OUTPUT_READABLE_YAWPITCHROLL" if you want to see the yaw/
 // pitch/roll angles (in degrees) calculated from the quaternions coming
@@ -31,11 +39,6 @@ MPU6050 mpu;
 // Also note that yaw/pitch/roll angles suffer from gimbal lock (for
 // more info, see: http://en.wikipedia.org/wiki/Gimbal_lock)
 #define OUTPUT_READABLE_YAWPITCHROLL
-
-
-#define INTERRUPT_PIN 2  // use pin 2 on Arduino Uno & most boards
-#define LED_PIN 13 // (Arduino is 13, Teensy is 11, Teensy++ is 6)
-bool blinkState = false;
 
 // MPU control/status vars
 bool dmpReady = false;  // set true if DMP init was successful
@@ -54,23 +57,25 @@ VectorFloat gravity;    // [x, y, z]            gravity vector
 float euler[3];         // [psi, theta, phi]    Euler angle container
 float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
 
-// packet structure for InvenSense teapot demo
-uint8_t teapotPacket[14] = { '$', 0x02, 0,0, 0,0, 0,0, 0,0, 0x00, 0x00, '\r', '\n' };
 
 
 
-// ================================================================
-// ===               INTERRUPT DETECTION ROUTINE                ===
-// ================================================================
 
-volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
-void dmpDataReady() {
-    mpuInterrupt = true;
+gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int speedL) {
+  in1 = dirRA;
+  in2 = dirRB;
+  in3 = dirLA;
+  in4 = dirLB;
+  enA = speedR;
+  enB = speedL;
+  pinMode(in1, OUTPUT);
+  pinMode(in2, OUTPUT);
+  pinMode(in3, OUTPUT);
+  pinMode(in4, OUTPUT);
+  pinMode(enA, OUTPUT);
+  pinMode(enB, OUTPUT);
+  
 }
-
-
-
-gyroturn::gyroturn() {}
 
 void gyroturn::begin() {
    // join I2C bus (I2Cdev library doesn't do this automatically)
@@ -87,7 +92,6 @@ void gyroturn::begin() {
     // initialize device
     Serial.println(F("Initializing I2C devices..."));
     mpu.initialize();
-    pinMode(INTERRUPT_PIN, INPUT);
 
     // verify connection
     Serial.println(F("Testing device connections..."));
@@ -119,13 +123,7 @@ void gyroturn::begin() {
         Serial.println(F("Enabling DMP..."));
         mpu.setDMPEnabled(true);
 
-        // enable Arduino interrupt detection
-        Serial.print(F("Enabling interrupt detection (Arduino external interrupt "));
-        Serial.print(digitalPinToInterrupt(INTERRUPT_PIN));
-        Serial.println(F(")..."));
-        attachInterrupt(digitalPinToInterrupt(INTERRUPT_PIN), dmpDataReady, RISING);
-        mpuIntStatus = mpu.getIntStatus();
-
+    
         // set our DMP Ready flag so the main loop() function knows it's okay to use it
         //Serial.println(F("DMP ready! Waiting for first interrupt..."));
         dmpReady = true;
@@ -141,42 +139,91 @@ void gyroturn::begin() {
         Serial.print(devStatus);
         Serial.println(F(")"));
     }
-}
 
-int gyroturn::gotodeg(int deg) {
+  lcd.init();  
+  lcd.backlight();
+  lcd.setCursor(3,0);
+  lcd.print("Started");
   
-  int er = deg - getYaw();
+  Serial.print("in1 = ");  
+  Serial.println(in1);
+  Serial.print("in2 = ");  
+  Serial.println(in2);
+  Serial.print("in3 = ");  
+  Serial.println(in3);
+  Serial.print("in4 = ");  
+  Serial.println(in4);
+  Serial.print("enA = ");  
+  Serial.println(enA);
+  Serial.print("enB = ");  
+  Serial.println(enB);
 
-  if (er > 0) {
-    Serial.println("setpoint bigger than current");
-  } 
-  else {
-    Serial.println("setpoint smaller than current");
-  }
-
-  return (deg);
 }
 
+void gyroturn::gotoang(int deg) {
+  
+  int tempyaw = getYaw(); //input value
+  int output = PIDcalc(tempyaw, deg);//output value, representing the error
+  lcdershow(output, tempyaw);
+  spin(output);
+}
+
+double gyroturn::PIDcalc(double inp, int sp){
+   currentTime = millis();                //get current time
+   elapsedTime = (double)(currentTime - previousTime); //compute time elapsed from previous computation
+   error = sp - inp;                                 // determine error
+   cumError += error * elapsedTime;                   // compute integral
+   rateError = (error - lastError)/elapsedTime;       // compute derivative deltaError/deltaTime
+ 
+   double out = kp*error + ki*cumError + kd*rateError; //PID output               
+
+   lastError = error;                                 //remember current error
+   previousTime = currentTime;                        //remember current time
+ 
+   return out;                                        //the function returns the PID output value 
+  
+}
+
+void gyroturn::spin(int output){ //point spin (both motors at the same speed)
+
+ right(output);
+ left(output);
+
+ if (output > 0){//right turn 
+  printg('B', 'F', output, output);
+ }
+ if (output < 0){//left turn 
+  printg('F', 'B', output, output);
+ }
+
+}
+
+void gyroturn::right(int speed){
+  speed = map(speed, 0, 400, 0, 255);
+  digitalWrite(in1, HIGH);
+  digitalWrite(in2, LOW);   //backward
+  analogWrite(enA, speed);
+  digitalWrite(in3, LOW);   //forward
+  digitalWrite(in4, HIGH);
+  analogWrite(enB, speed);
+}
+void gyroturn::left(int speed){
+  speed = map(speed, 0, 400, 0, 255);
+  digitalWrite(in1, LOW);     //forward
+  digitalWrite(in2, HIGH);
+  analogWrite(enA, abs(speed));
+  digitalWrite(in3, HIGH);    //backward
+  digitalWrite(in4, LOW);
+  analogWrite(enB, abs(speed));
+
+}
 
 int gyroturn::getYaw(){
   
     if (!dmpReady) return;
     // read a packet from FIFO
     if (mpu.dmpGetCurrentFIFOPacket(fifoBuffer)) { // Get the Latest packet 
-        #ifdef OUTPUT_READABLE_QUATERNION
-            // display quaternion values in easy matrix form: w x y z
-            mpu.dmpGetQuaternion(&q, fifoBuffer);
-            Serial.print("quat\t");
-            Serial.print(q.w);
-            Serial.print("\t");
-            Serial.print(q.x);
-            Serial.print("\t");
-            Serial.print(q.y);
-            Serial.print("\t");
-            Serial.println(q.z);
-        #endif
-
-      
+             
         #ifdef OUTPUT_READABLE_YAWPITCHROLL
             // display Euler angles in degrees
             mpu.dmpGetQuaternion(&q, fifoBuffer);
@@ -197,7 +244,29 @@ int gyroturn::getYaw(){
    
 }
 
-float gyroturn::getTemp(){
-   return mpu.getTemperature();
+void gyroturn::lcdershow(int e, int g){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("  error | gyro  ");
+  lcd.setCursor(3,1);
+  lcd.print(e);  
+  lcd.setCursor(8,1);
+  lcd.print("|");  
+  lcd.setCursor(11,1);
+  lcd.print(g); 
+}
+void gyroturn::printg(char dirR, char dirL, int speedR, int speedL){
+  Serial.println("-------------------------------------");
+  Serial.println("               | Direction |  Speed");
+    Serial.print("Right Motor    |    ");
+  Serial.print(dirR);
+  Serial.print("      |  ");
+  Serial.println(speedR);
+  Serial.print("Left Motor     |    ");
+  Serial.print(dirL);
+  Serial.print("      |  ");
+  Serial.println(speedL);
 
-}  
+  
+ 
+}

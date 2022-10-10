@@ -1,17 +1,16 @@
 
 
 #include "gyroturn.h"
-gyroturn myturn;  
+gyroturn myturn(2, 4, 7, 8, 3, 5);  //in1, in2, in3, in4, enA, enB in L298N. 
+
 
 void setup() {
-myturn.begin();
+myturn.begin(); //starts serial monitor at 115200
 }
 
 void loop() { 
-  //myturn.run();
   
-  myturn.gotodeg(90);
-  //Serial.println(myturn.getYaw());
-   delay(1000);
+ myturn.gotoang(90);
+  delay(100);
    
  }
