@@ -1,4 +1,4 @@
-# Gyro Turn with PID control
+# Robot Gyro Turn function with PID control
 
 This Library provides a simple PID control function for Robot turning 
 using MPU6050 Gyro control
