@@ -17,7 +17,7 @@
    void printg(char dirR, char dirL, int speedR, int speedL);//internal info printing procedure
   public:
    gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int speedL);
-   void begin();   
+   void begin(double PRO, double INT, double DIF);   
    void gotoang(int deg); //turn to a setpoint (angle)
    int getYaw(); //return the Yaw angle
    void gyroreset();

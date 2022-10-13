@@ -26,9 +26,9 @@ double error;
 double lastError;
 double input, output;
 double cumError, rateError;
-double kp = 1.5;
+double kp = 0;
 double ki = 0; //max 0.00185
-double kd = 100;
+double kd = 0;
 
 MPU6050 mpu;
 LiquidCrystal_I2C lcd(0x27,16,2);
@@ -77,7 +77,7 @@ gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int s
   
 }
 
-void gyroturn::begin() {
+void gyroturn::begin(double PRO, double INT, double DIF) {
    // join I2C bus (I2Cdev library doesn't do this automatically)
     #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
         Wire.begin();
@@ -138,6 +138,7 @@ void gyroturn::begin() {
         Serial.print(F("DMP Initialization failed (code "));
         Serial.print(devStatus);
         Serial.println(F(")"));
+      
     }
 
   lcd.init();  
@@ -157,6 +158,9 @@ void gyroturn::begin() {
   Serial.println(enA);
   Serial.print("enB = ");  
   Serial.println(enB);
+  kp = PRO;
+  ki = INT; //max 0.00185
+  kd = DIF;
 
 }
 
@@ -171,7 +175,7 @@ void gyroturn::gotoang(int deg) {
 double gyroturn::PIDcalc(double inp, int sp){
    currentTime = millis();                //get current time
    elapsedTime = (double)(currentTime - previousTime); //compute time elapsed from previous computation
-   error = sp - inp;                                 // determine error
+   error = sp - inp;                                  // determine error
    cumError += error * elapsedTime;                   // compute integral
    rateError = (error - lastError)/elapsedTime;       // compute derivative deltaError/deltaTime
  
@@ -186,14 +190,16 @@ double gyroturn::PIDcalc(double inp, int sp){
 
 void gyroturn::spin(int output){ //point spin (both motors at the same speed)
 
- right(output);
- left(output);
 
  if (output > 0){//right turn 
   printg('B', 'F', output, output);
+   right(output);
+
  }
  if (output < 0){//left turn 
   printg('F', 'B', output, output);
+   left(output);
+
  }
 
 }
@@ -202,10 +208,12 @@ void gyroturn::right(int speed){
   speed = map(speed, 0, 400, 0, 255);
   digitalWrite(in1, HIGH);
   digitalWrite(in2, LOW);   //backward
-  analogWrite(enA, speed);
+  analogWrite(enA, abs(speed));
   digitalWrite(in3, LOW);   //forward
   digitalWrite(in4, HIGH);
-  analogWrite(enB, speed);
+  analogWrite(enB, abs(speed));
+  Serial.println("going right");
+
 }
 void gyroturn::left(int speed){
   speed = map(speed, 0, 400, 0, 255);
@@ -215,6 +223,7 @@ void gyroturn::left(int speed){
   digitalWrite(in3, HIGH);    //backward
   digitalWrite(in4, LOW);
   analogWrite(enB, abs(speed));
+  Serial.println("going left");
 
 }
 
