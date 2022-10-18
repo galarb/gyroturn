@@ -20,7 +20,8 @@
 #include "LiquidCrystal_I2C.h"
 #include "HardwareSerial.h"
 
-unsigned long currentTime, previousTime;
+unsigned long currentTime;
+unsigned long previousTime;
 double elapsedTime;
 double error;
 double lastError;
@@ -29,6 +30,7 @@ double cumError, rateError;
 double kp = 0;
 double ki = 0; //max 0.00185
 double kd = 0;
+bool flag = true;
 
 MPU6050 mpu;
 LiquidCrystal_I2C lcd(0x27,16,2);
@@ -161,29 +163,64 @@ void gyroturn::begin(double PRO, double INT, double DIF) {
   kp = PRO;
   ki = INT; //max 0.00185
   kd = DIF;
-
+  previousTime = millis(); //otherwise the first Itegral value will be very high
 }
-
-void gyroturn::gotoang(int deg) {
-  
+void gyroturn::steer(int deg, int power){
   int tempyaw = getYaw(); //input value
-  int output = PIDcalc(tempyaw, deg);//output value, representing the error
-  lcdershow(output, tempyaw);
-  spin(output);
+  int output = PIDcalc(tempyaw, deg); //output value = the calculated error
+  lcdershow(deg, output, tempyaw);
+  delay(100);
+  if (output > 0){//right turn 
+   // printg('B', 'F', output, output);
+    right(output);
+        Serial.println("going right");
+
+  }
+  if (output < 0){//left turn 
+   // printg('F', 'B', output, output);
+    left(output);
+        Serial.println("going left");
+
+  }
+  if (output < 50 && output > -50 ){//go straight
+    fwd(power);
+    Serial.println("going FWD");
+  }
+}
+void gyroturn::gotoang(int deg, int timer) {
+  if(flag){
+    for(int i = 0; i < timer;){
+    int tempyaw = getYaw(); //input value
+    int output = PIDcalc(tempyaw, deg); //output value, the calculated error
+    lcdershow(deg, output, tempyaw);
+    Serial.print(output); //for serial plotter
+    Serial.print("\t"); //for serial plotter
+    Serial.print(deg); //for serial plotter
+    Serial.print("\t"); //for serial plotter
+
+
+    spin(output);
+    i++;
+  }
+  flag = false;
+  stop();
+
+ }
 }
 
 double gyroturn::PIDcalc(double inp, int sp){
    currentTime = millis();                //get current time
-   elapsedTime = (double)(currentTime - previousTime); //compute time elapsed from previous computation
+   elapsedTime = (double)(currentTime - previousTime)/1000; //compute time elapsed from previous computation (60ms approx). divide in 1000 to get in Sec
+   Serial.print(currentTime); //for serial plotter
+    Serial.println("\t"); //for serial plotter
+
    error = sp - inp;                                  // determine error
    cumError += error * elapsedTime;                   // compute integral
    rateError = (error - lastError)/elapsedTime;       // compute derivative deltaError/deltaTime
- 
    double out = kp*error + ki*cumError + kd*rateError; //PID output               
-
+ 
    lastError = error;                                 //remember current error
    previousTime = currentTime;                        //remember current time
- 
    return out;                                        //the function returns the PID output value 
   
 }
@@ -192,40 +229,56 @@ void gyroturn::spin(int output){ //point spin (both motors at the same speed)
 
 
  if (output > 0){//right turn 
-  printg('B', 'F', output, output);
+   //printg('B', 'F', output, output);
    right(output);
 
  }
  if (output < 0){//left turn 
-  printg('F', 'B', output, output);
+  // printg('F', 'B', output, output);
    left(output);
-
  }
 
 }
 
 void gyroturn::right(int speed){
-  speed = map(speed, 0, 400, 0, 255);
+  if (speed > 255) {speed = 255;}
+  if (speed < -255) {speed = -255;}
   digitalWrite(in1, HIGH);
   digitalWrite(in2, LOW);   //backward
   analogWrite(enA, abs(speed));
   digitalWrite(in3, LOW);   //forward
   digitalWrite(in4, HIGH);
   analogWrite(enB, abs(speed));
-  Serial.println("going right");
-
 }
 void gyroturn::left(int speed){
-  speed = map(speed, 0, 400, 0, 255);
+  if (speed > 255) {speed = 255;}
+  if (speed < -255) {speed = -255;}
   digitalWrite(in1, LOW);     //forward
   digitalWrite(in2, HIGH);
   analogWrite(enA, abs(speed));
   digitalWrite(in3, HIGH);    //backward
   digitalWrite(in4, LOW);
   analogWrite(enB, abs(speed));
-  Serial.println("going left");
-
 }
+
+void gyroturn::stop(){
+  digitalWrite(in1, LOW);    
+  digitalWrite(in2, LOW);
+  analogWrite(enA, 0);
+  digitalWrite(in3, LOW);   
+  digitalWrite(in4, LOW);
+  analogWrite(enB, 0);
+}
+
+void gyroturn::fwd(int pwr){
+  digitalWrite(in1, HIGH);    
+  digitalWrite(in2, LOW);
+  analogWrite(enA, pwr);
+  digitalWrite(in3, HIGH);   
+  digitalWrite(in4, LOW);
+  analogWrite(enB, pwr);
+}
+
 
 int gyroturn::getYaw(){
   
@@ -246,20 +299,25 @@ int gyroturn::getYaw(){
             Serial.print("\t");
             Serial.println(ypr[2] * 180/M_PI);*/
         #endif
-
-        
     }
-  
-   
 }
 
-void gyroturn::lcdershow(int e, int g){
+int gyroturn::getTemp(){
+  int t = mpu.getTemperature();
+  return(t);
+}
+
+void gyroturn::lcdershow(int s, int e, int g){ //setpoint, error, gyro
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("  error | gyro  ");
+  lcd.print("SP | PID | gyro");
+  lcd.setCursor(0,1);
+  lcd.print(s);  
   lcd.setCursor(3,1);
-  lcd.print(e);  
-  lcd.setCursor(8,1);
+  lcd.print("|"); 
+  lcd.setCursor(5,1);
+  lcd.print(e); 
+  lcd.setCursor(9,1);
   lcd.print("|");  
   lcd.setCursor(11,1);
   lcd.print(g); 
@@ -275,7 +333,4 @@ void gyroturn::printg(char dirR, char dirL, int speedR, int speedL){
   Serial.print(dirL);
   Serial.print("      |  ");
   Serial.println(speedL);
-
-  
- 
 }

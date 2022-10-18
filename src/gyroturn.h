@@ -3,8 +3,7 @@
  
  class gyroturn {
   private:
-   void lcdershow(int e, int g);
-   double PIDcalc(double inp, int sp);
+   void lcdershow(int e, int g, int s);
    void spin(int output);
    void right(int speed);
    void left(int speed);
@@ -18,10 +17,14 @@
   public:
    gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int speedL);
    void begin(double PRO, double INT, double DIF);   
-   void gotoang(int deg); //turn to a setpoint (angle)
+   void gotoang(int deg, int timer); //turn to a setpoint (angle), for #of correctios
    int getYaw(); //return the Yaw angle
-   void gyroreset();
-   
+   int getTemp();
+   double PIDcalc(double inp, int sp);
+   void stop();
+   void fwd(int pwr);
+   void steer(int deg, int power);
+
 
  };
 #endif 
