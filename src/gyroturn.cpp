@@ -1,9 +1,13 @@
 /*
 
 
-                   Robot Turning function to specific Degree 
-											PID	Software Control for Arduino
-			            			 	 Using Gyro MPU-6050
+                   Robot Control function 
+								PID	Software Control for Arduino
+			      			 	 Using: Gyro MPU-6050
+                            LCD 16x2
+                            HC-06 Bluethooth
+                            LM298N Motor Driver
+                      
                
       by Gal Arbel
       2022
@@ -19,6 +23,8 @@
 #include "MPU6050_6Axis_MotionApps20.h"
 #include "LiquidCrystal_I2C.h"
 #include "HardwareSerial.h"
+#include <SoftwareSerial.h>
+#include "clicli.h"
 
 unsigned long currentTime;
 unsigned long previousTime;
@@ -28,12 +34,19 @@ double lastError;
 double input, output;
 double cumError, rateError;
 double kp = 0;
-double ki = 0; //max 0.00185
+double ki = 0; 
 double kd = 0;
 bool flag = true;
+int steps = 0;
+const byte rxPin = 11;
+const byte txPin = 13;
+int btdata;
 
 MPU6050 mpu;
 LiquidCrystal_I2C lcd(0x27,16,2);
+SoftwareSerial BTSerial(rxPin, txPin); // RX TX
+clicli mycli;  
+
 
 // uncomment "OUTPUT_READABLE_YAWPITCHROLL" if you want to see the yaw/
 // pitch/roll angles (in degrees) calculated from the quaternions coming
@@ -63,21 +76,23 @@ float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gra
 
 
 
-gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int speedL) {
+gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int speedL, int encodPin) {
   in1 = dirRA;
   in2 = dirRB;
   in3 = dirLA;
   in4 = dirLB;
   enA = speedR;
   enB = speedL;
+  encoderPin = encodPin;
   pinMode(in1, OUTPUT);
   pinMode(in2, OUTPUT);
   pinMode(in3, OUTPUT);
   pinMode(in4, OUTPUT);
   pinMode(enA, OUTPUT);
   pinMode(enB, OUTPUT);
-  
+  pinMode(encoderPin, INPUT_PULLUP);
 }
+
 
 void gyroturn::begin(double PRO, double INT, double DIF) {
    // join I2C bus (I2Cdev library doesn't do this automatically)
@@ -88,7 +103,9 @@ void gyroturn::begin(double PRO, double INT, double DIF) {
         Fastwire::setup(400, true);
     #endif
 
-    Serial.begin(115200);
+    Serial.begin(9600);
+    BTSerial.begin(9600);
+
     while (!Serial); // wait for Leonardo enumeration, others continue immediately
 
     // initialize device
@@ -100,10 +117,10 @@ void gyroturn::begin(double PRO, double INT, double DIF) {
     Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
 
     // wait for ready
-   //  Serial.println(F("\nSend any character to begin DMP programming and demo: "));
-    while (Serial.available() && Serial.read()); // empty buffer
+    // Serial.println(F("\nSend any character to begin DMP programming and demo: "));
+    // while (Serial.available() && Serial.read()); // empty buffer
     //while (!Serial.available());                 // wait for data
-    while (Serial.available() && Serial.read()); // empty buffer again
+    //while (Serial.available() && Serial.read()); // empty buffer again
 
     // load and configure the DMP
     Serial.println(F("Initializing DMP..."));
@@ -160,30 +177,48 @@ void gyroturn::begin(double PRO, double INT, double DIF) {
   Serial.println(enA);
   Serial.print("enB = ");  
   Serial.println(enB);
+  Serial.print("Encoder Pin = ");  
+  Serial.println(encoderPin);
+  
+  mycli.begin();
+
   kp = PRO;
-  ki = INT; //max 0.00185
+  ki = INT; 
   kd = DIF;
   previousTime = millis(); //otherwise the first Itegral value will be very high
 }
-void gyroturn::steer(int deg, int power){
+void gyroturn::steer(int deg, int power, double KP, double KI, double KD){
+  kp = KP;
+  ki = KI; 
+  kd = KD;
   int tempyaw = getYaw(); //input value
   int output = PIDcalc(tempyaw, deg); //output value = the calculated error
   lcdershow(deg, output, tempyaw);
-  delay(100);
-  if (output > 0){//right turn 
-   // printg('B', 'F', output, output);
-    right(output);
-        Serial.println("going right");
+  delay(30);
+  if (output > 0){// right correction 
+  int powerR = power - output;
+  int powerL = power + output;
+  if (powerR > 255) {powerR = 255;}
+  if (powerR < 0) {powerR = 0;}
+  if (powerL > 255) {powerL = 255;}
+  if (powerL < 0) {powerL = 0;}
+    printg('F', 'F', powerR, powerL);
+    fwd(powerR, powerL);
 
   }
-  if (output < 0){//left turn 
-   // printg('F', 'B', output, output);
-    left(output);
-        Serial.println("going left");
+  else if (output < 0){//left correction 
+  int powerR = power + output;
+  int powerL = power - output;
+  if (powerR > 255) {powerR = 255;}
+  if (powerR < 0) {powerR = 0;}
+  if (powerL > 255) {powerL = 255;}
+  if (powerL < 0) {powerL = 0;}
+    printg('F', 'F', powerR, powerL);
+    fwd(powerR, powerL);
 
   }
-  if (output < 50 && output > -50 ){//go straight
-    fwd(power);
+  else {//go straight
+    fwd(power, power);
     Serial.println("going FWD");
   }
 }
@@ -193,10 +228,10 @@ void gyroturn::gotoang(int deg, int timer) {
     int tempyaw = getYaw(); //input value
     int output = PIDcalc(tempyaw, deg); //output value, the calculated error
     lcdershow(deg, output, tempyaw);
-    Serial.print(output); //for serial plotter
-    Serial.print("\t"); //for serial plotter
-    Serial.print(deg); //for serial plotter
-    Serial.print("\t"); //for serial plotter
+    //Serial.print(output); //for serial plotter
+    //Serial.print("\t"); //for serial plotter
+    //Serial.print(deg); //for serial plotter
+    //Serial.print("\t"); //for serial plotter
 
 
     spin(output);
@@ -211,9 +246,8 @@ void gyroturn::gotoang(int deg, int timer) {
 double gyroturn::PIDcalc(double inp, int sp){
    currentTime = millis();                //get current time
    elapsedTime = (double)(currentTime - previousTime)/1000; //compute time elapsed from previous computation (60ms approx). divide in 1000 to get in Sec
-   Serial.print(currentTime); //for serial plotter
-    Serial.println("\t"); //for serial plotter
-
+   //Serial.print(currentTime); //for serial plotter
+   //Serial.println("\t"); //for serial plotter
    error = sp - inp;                                  // determine error
    cumError += error * elapsedTime;                   // compute integral
    rateError = (error - lastError)/elapsedTime;       // compute derivative deltaError/deltaTime
@@ -225,40 +259,38 @@ double gyroturn::PIDcalc(double inp, int sp){
   
 }
 
+
+
 void gyroturn::spin(int output){ //point spin (both motors at the same speed)
 
 
  if (output > 0){//right turn 
    //printg('B', 'F', output, output);
-   right(output);
+   right(output, output);
 
  }
  if (output < 0){//left turn 
   // printg('F', 'B', output, output);
-   left(output);
+   left(output, output);
  }
 
 }
 
-void gyroturn::right(int speed){
-  if (speed > 255) {speed = 255;}
-  if (speed < -255) {speed = -255;}
+void gyroturn::right(int speedR, int speedL){
   digitalWrite(in1, HIGH);
-  digitalWrite(in2, LOW);   //backward
-  analogWrite(enA, abs(speed));
-  digitalWrite(in3, LOW);   //forward
+  digitalWrite(in2, LOW);   //R backward
+  analogWrite(enA, abs(speedR));
+  digitalWrite(in3, LOW);   //L forward
   digitalWrite(in4, HIGH);
-  analogWrite(enB, abs(speed));
+  analogWrite(enB, abs(speedL));
 }
-void gyroturn::left(int speed){
-  if (speed > 255) {speed = 255;}
-  if (speed < -255) {speed = -255;}
-  digitalWrite(in1, LOW);     //forward
+void gyroturn::left(int speedR, int speedL){
+  digitalWrite(in1, LOW);     //R forward
   digitalWrite(in2, HIGH);
-  analogWrite(enA, abs(speed));
-  digitalWrite(in3, HIGH);    //backward
+  analogWrite(enA, abs(speedR));
+  digitalWrite(in3, HIGH);    //L backward
   digitalWrite(in4, LOW);
-  analogWrite(enB, abs(speed));
+  analogWrite(enB, abs(speedL));
 }
 
 void gyroturn::stop(){
@@ -270,15 +302,39 @@ void gyroturn::stop(){
   analogWrite(enB, 0);
 }
 
-void gyroturn::fwd(int pwr){
+void gyroturn::fwd(int pwrR, int pwrL){
   digitalWrite(in1, HIGH);    
   digitalWrite(in2, LOW);
-  analogWrite(enA, pwr);
+  analogWrite(enA, pwrR);
   digitalWrite(in3, HIGH);   
   digitalWrite(in4, LOW);
-  analogWrite(enB, pwr);
+  analogWrite(enB, pwrL);
 }
 
+void gyroturn::goencoder(int clicks, double KP, double KI, double KD){
+  kp = KP;
+  ki = KI; 
+  kd = KD;
+  int tempsteps = getSteps(); //input value
+  int output = PIDcalc(tempsteps, clicks); //output value = the calculated error
+  lcdenshow(clicks, output, tempsteps);
+  delay(30);
+  if (output > 0){  // 
+   fwd(output, output);
+  }
+  if (output < 0){  // 
+   stop();
+  }  
+}
+int gyroturn::getSteps(){
+  if(digitalRead(encoderPin)){
+     steps = steps +1;
+     Serial.print("steps =");
+     Serial.println(steps);
+     while(digitalRead(encoderPin));
+   }
+  return steps;
+}
 
 int gyroturn::getYaw(){
   
@@ -307,6 +363,22 @@ int gyroturn::getTemp(){
   return(t);
 }
 
+void gyroturn::lcdenshow(int c, int o, int t){ //setpoint, error, gyro
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("SP | PID |encod");
+  lcd.setCursor(0,1);
+  lcd.print(c);  
+  lcd.setCursor(3,1);
+  lcd.print("|"); 
+  lcd.setCursor(5,1);
+  lcd.print(o); 
+  lcd.setCursor(9,1);
+  lcd.print("|");  
+  lcd.setCursor(11,1);
+  lcd.print(t); 
+}
+
 void gyroturn::lcdershow(int s, int e, int g){ //setpoint, error, gyro
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -333,4 +405,18 @@ void gyroturn::printg(char dirR, char dirL, int speedR, int speedL){
   Serial.print(dirL);
   Serial.print("      |  ");
   Serial.println(speedL);
+}
+
+void gyroturn::btcheck(bool onoff){
+  
+  
+ /* while(Serial.available()){
+    btdata = Serial.read();
+    BTSerial.write(btdata);
+  }*/
+  while(BTSerial.available()) {
+    btdata = BTSerial.read();
+    Serial.write(btdata);
+  }
+  mycli.run();
 }
