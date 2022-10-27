@@ -17,14 +17,14 @@
 
 
 #include "gyroturn.h"
-#include "Arduino.h"
+#include <Arduino.h>
 #include <Wire.h>
-#include "I2Cdev.h"
-#include "MPU6050_6Axis_MotionApps20.h"
-#include "LiquidCrystal_I2C.h"
-#include "HardwareSerial.h"
+#include <I2Cdev.h>
+#include <MPU6050_6Axis_MotionApps20.h>
+#include <LiquidCrystal_I2C.h>
+#include <HardwareSerial.h>
 #include <SoftwareSerial.h>
-#include "clicli.h"
+#include <clicli.h>
 
 unsigned long currentTime;
 unsigned long previousTime;
