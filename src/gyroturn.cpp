@@ -7,7 +7,7 @@
                             LCD 16x2
                             HC-06 Bluethooth
                             LM298N Motor Driver
-                      
+                            hc-sr04 Ultrasonic module
                
       by Gal Arbel
       2022
@@ -17,14 +17,14 @@
 
 
 #include "gyroturn.h"
-#include <Arduino.h>
+#include "Arduino.h"
 #include <Wire.h>
-#include <I2Cdev.h>
-#include <MPU6050_6Axis_MotionApps20.h>
-#include <LiquidCrystal_I2C.h>
-#include <HardwareSerial.h>
+#include "I2Cdev.h"
+#include "MPU6050_6Axis_MotionApps20.h"
+#include "LiquidCrystal_I2C.h"
+#include "HardwareSerial.h"
 #include <SoftwareSerial.h>
-#include <clicli.h>
+#include "clicli.h"
 
 unsigned long currentTime;
 unsigned long previousTime;
@@ -40,7 +40,11 @@ bool flag = true;
 int steps = 0;
 const byte rxPin = 11;
 const byte txPin = 13;
-int btdata;
+const unsigned int MAX_MESSAGE_LENGTH = 64;
+String btcmd="";
+long duration; // variable for the duration of sound wave travel
+int distance; // variable for the distance measurement
+
 
 MPU6050 mpu;
 LiquidCrystal_I2C lcd(0x27,16,2);
@@ -76,14 +80,16 @@ float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gra
 
 
 
-gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int speedL, int encodPin) {
+gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int speedL, int encodPin, int TrigPin, int EchoPin) {
   in1 = dirRA;
   in2 = dirRB;
   in3 = dirLA;
   in4 = dirLB;
-  enA = speedR;
-  enB = speedL;
+  enA = speedL;
+  enB = speedR;
   encoderPin = encodPin;
+  trigPin = TrigPin;
+  echoPin = EchoPin;
   pinMode(in1, OUTPUT);
   pinMode(in2, OUTPUT);
   pinMode(in3, OUTPUT);
@@ -91,10 +97,13 @@ gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int s
   pinMode(enA, OUTPUT);
   pinMode(enB, OUTPUT);
   pinMode(encoderPin, INPUT_PULLUP);
+  pinMode(trigPin, OUTPUT); 
+  pinMode(echoPin, INPUT); 
+ 
 }
 
 
-void gyroturn::begin(double PRO, double INT, double DIF) {
+void gyroturn::begin(int bdrate) {
    // join I2C bus (I2Cdev library doesn't do this automatically)
     #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
         Wire.begin();
@@ -102,11 +111,12 @@ void gyroturn::begin(double PRO, double INT, double DIF) {
     #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
         Fastwire::setup(400, true);
     #endif
+    mycli.begin();
 
-    Serial.begin(9600);
-    BTSerial.begin(9600);
+    Serial.begin(bdrate);
+    BTSerial.begin(bdrate);
 
-    while (!Serial); // wait for Leonardo enumeration, others continue immediately
+    //  while (!Serial); // wait for Leonardo enumeration, others continue immediately
 
     // initialize device
     Serial.println(F("Initializing I2C devices..."));
@@ -179,14 +189,40 @@ void gyroturn::begin(double PRO, double INT, double DIF) {
   Serial.println(enB);
   Serial.print("Encoder Pin = ");  
   Serial.println(encoderPin);
-  
-  mycli.begin();
-
-  kp = PRO;
-  ki = INT; 
-  kd = DIF;
+  Serial.print("Echo Pin = ");  
+  Serial.println(echoPin);
+  Serial.print("Trig Pin = ");  
+  Serial.println(trigPin);  
   previousTime = millis(); //otherwise the first Itegral value will be very high
 }
+void gyroturn::goUltrasonic(int dis, int deg, int power, double KP, double KI, double KD){
+  kp = KP;
+  ki = KI; 
+  kd = KD;
+  int tempdis = getDis(); //input value
+  int output = PIDcalc(tempdis, dis); //output value = the calculated error
+  if (output < 0){// go forward at a calculated speed (affected by the error)
+    int powerR = power - abs(output);
+    int powerL = power - abs(output);
+    if (powerR > 255) {powerR = 255;}
+    if (powerR < 0) {powerR = 0;}
+    if (powerL > 255) {powerL = 255;}
+    if (powerL < 0) {powerL = 0;}
+    printg('F', 'F', powerR, powerL);
+    fwd(powerR, powerL);
+  }
+  if (output > 0){// go backwards at a calculated speed (affected by the error)
+    int powerR =  output;
+    int powerL =  output;
+    if (powerR > 255) {powerR = 255;}
+    if (powerR < 0) {powerR = 0;}
+    if (powerL > 255) {powerL = 255;}
+    if (powerL < 0) {powerL = 0;}
+    printg('B', 'B', powerR, powerL);
+    bckwd(abs(powerR), abs(powerL));
+  }
+}
+
 void gyroturn::steer(int deg, int power, double KP, double KI, double KD){
   kp = KP;
   ki = KI; 
@@ -194,35 +230,43 @@ void gyroturn::steer(int deg, int power, double KP, double KI, double KD){
   int tempyaw = getYaw(); //input value
   int output = PIDcalc(tempyaw, deg); //output value = the calculated error
   lcdershow(deg, output, tempyaw);
-  delay(30);
+
+  delay(50);
   if (output > 0){// right correction 
-  int powerR = power - output;
-  int powerL = power + output;
-  if (powerR > 255) {powerR = 255;}
-  if (powerR < 0) {powerR = 0;}
-  if (powerL > 255) {powerL = 255;}
-  if (powerL < 0) {powerL = 0;}
-    printg('F', 'F', powerR, powerL);
+    int powerR = power - output;
+    int powerL = power + output;
+    if (powerR < 0) {
+      powerR = 0; 
+      }
+    if (powerL > 255) {
+      powerL = 255;
+      }
+    //printg('F', 'F', powerR, powerL);
     fwd(powerR, powerL);
-
   }
-  else if (output < 0){//left correction 
-  int powerR = power + output;
-  int powerL = power - output;
-  if (powerR > 255) {powerR = 255;}
-  if (powerR < 0) {powerR = 0;}
-  if (powerL > 255) {powerL = 255;}
-  if (powerL < 0) {powerL = 0;}
-    printg('F', 'F', powerR, powerL);
+ else if (output < 0){//left correction 
+  int powerR = power + abs(output);
+  int powerL = power - abs(output);
+  if (powerR > 255) {
+    powerR = 255;
+    }
+  if (powerL < 0) {
+    powerL = 0;
+    }
+     // printg('F', 'F', powerR, powerL);
     fwd(powerR, powerL);
-
   }
-  else {//go straight
+ else if(!output) {//go straight
     fwd(power, power);
-    Serial.println("going FWD");
+   // Serial.println("going FWD");
+
   }
 }
-void gyroturn::gotoang(int deg, int timer) {
+
+void gyroturn::gotoang(int deg, int timer,  double KP, double KI, double KD) {
+  kp = KP;
+  ki = KI; 
+  kd = KD;
   if(flag){
     for(int i = 0; i < timer;){
     int tempyaw = getYaw(); //input value
@@ -232,8 +276,6 @@ void gyroturn::gotoang(int deg, int timer) {
     //Serial.print("\t"); //for serial plotter
     //Serial.print(deg); //for serial plotter
     //Serial.print("\t"); //for serial plotter
-
-
     spin(output);
     i++;
   }
@@ -252,9 +294,13 @@ double gyroturn::PIDcalc(double inp, int sp){
    cumError += error * elapsedTime;                   // compute integral
    rateError = (error - lastError)/elapsedTime;       // compute derivative deltaError/deltaTime
    double out = kp*error + ki*cumError + kd*rateError; //PID output               
- 
+   Serial.println(cumError);
    lastError = error;                                 //remember current error
    previousTime = currentTime;                        //remember current time
+   if(out > 254){out = 254;}    //limit the function for smoother operation
+   if(out < -254){out = -254;}
+   if(cumError > 255 || cumError < -255){cumError = 0; out = 0;} // reset the Integral commulator
+   if(!error){cumError = 0; out = 0;}             // reset the Integral commulator
    return out;                                        //the function returns the PID output value 
   
 }
@@ -311,6 +357,15 @@ void gyroturn::fwd(int pwrR, int pwrL){
   analogWrite(enB, pwrL);
 }
 
+void gyroturn::bckwd(int pwrR, int pwrL){
+  digitalWrite(in1, LOW);    
+  digitalWrite(in2, HIGH);
+  analogWrite(enA, pwrR);
+  digitalWrite(in3, LOW);   
+  digitalWrite(in4, HIGH);
+  analogWrite(enB, pwrL);
+}
+
 void gyroturn::goencoder(int clicks, double KP, double KI, double KD){
   kp = KP;
   ki = KI; 
@@ -334,6 +389,18 @@ int gyroturn::getSteps(){
      while(digitalRead(encoderPin));
    }
   return steps;
+}
+
+int gyroturn::getDis(){
+  digitalWrite(trigPin, LOW); //clears the US conditions
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  duration = pulseIn(echoPin, HIGH); // Reads the echoPin, returns the sound wave travel time in microseconds
+  // Calculating the distance
+  distance = duration * 0.034 / 2; // Speed of sound wave divided by 2 (go and back)
+  return (distance);
 }
 
 int gyroturn::getYaw(){
@@ -408,15 +475,66 @@ void gyroturn::printg(char dirR, char dirL, int speedR, int speedL){
 }
 
 void gyroturn::btcheck(bool onoff){
-  
-  
+    
  /* while(Serial.available()){
     btdata = Serial.read();
     BTSerial.write(btdata);
   }*/
   while(BTSerial.available()) {
-    btdata = BTSerial.read();
-    Serial.write(btdata);
+    char message[MAX_MESSAGE_LENGTH];
+    static unsigned int message_pos = 0;
+  //    char btdata = BTSerial.read();
+    btcmd +=(char)BTSerial.read();
+    
+  /* if ( btdata != '\n' && (message_pos < MAX_MESSAGE_LENGTH - 1) )
+     {
+     message[message_pos] = btdata;  //Add the incoming byte to our message
+     message_pos++;
+     }
+     //Full message received...
+     else
+     {
+      message[message_pos] = '\0';     //Add null character to string
+      Serial.println(message);     //echo the message to terminal
+        /*
+      int command[4];
+      int argindex = 0;
+      char cmd;
+      char delim[] = " ";
+	     char tmpmsg[MAX_MESSAGE_LENGTH];
+       strcpy(tmpmsg,message);
+       message_pos = 0;
+       message[message_pos] = '\0';     //Add null character to string
+
+        char *ptr = strtok(tmpmsg, delim);
+	      while(ptr != NULL)
+	       {
+          if (argindex == 0) {
+            cmd = ptr[0];
+          }
+          command[argindex] = atoi(ptr);   
+          Serial.println(command[argindex]);
+          argindex++;  
+		      ptr = strtok(NULL, delim);
+	       } 
+
+    switch (cmd) {
+
+      case 't': // testing
+         
+        Serial.print(" testing"); 
+        delay(1000);
+        break;
+       
+       message_pos = 0;     //Reset for the next message
+
+    }*/
+   if(btcmd!=""){
+    Serial.print("Command recieved : ");
+    Serial.println(btcmd);
+    }
   }
-  mycli.run();
+ 
+ mycli.run();
+
 }

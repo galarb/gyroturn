@@ -1,15 +1,15 @@
 
 #include <gyroturn.h>
-gyroturn myturn(2, 4, 7, 8, 3, 6, 9);  //in1, in2, in3, in4, enA, enB in L298N, Encoder Pin
+gyroturn myturn(2, 4, 7, 8, 3, 6, 9, 12, 10);  
+//in1, in2, in3, in4, enA (L motor), enB (R Motor)in L298N, Encoder Pin, Rx, Tx 
+//note that in current version BT HC-06 is reserved rxPin = 11, and txPin = 13;
 
 void setup() {
-myturn.begin(2, 0, 0); //Kp, Ki, Kd defaults for Spin Turns
-
+myturn.begin(9600); //Baudrate for both Bluetooth and Serial Monitor
 }
 
 void loop() { 
  delay (30);
- //myturn.gotoang(-20, 260); //Angle, and how many iterations to get there.
- myturn.steer(0, 200, 2, 0, 0); // Heading, Power (0-255), Kp, Ki, Kd for steering
+ myturn.steer(0, 100, 2, 1, 0); // Heading, Power (0-255), Kp, Ki, Kd for steering
  }
 
