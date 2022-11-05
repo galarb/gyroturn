@@ -1,9 +1,11 @@
 
 #include <gyroturn.h>
-gyroturn myturn(2, 4, 7, 8, 3, 6, 9);  //in1, in2, in3, in4, enA, enB in L298N, Encoder Pin
+gyroturn myturn(2, 4, 7, 8, 3, 6, 9, 12, 10);  //in1, in2, in3, in4, enA, enB in L298N, Encoder Pin, Trig, Echo
+//note that  BT HC-06 is reserved rxPin = 11, and txPin = 13;
+//make sure enA and enB are PWM pins
 
 void setup() {
-myturn.begin(2, 0, 0); //Kp, Ki, Kd defaults for Spin Turns
+myturn.begin(9600); 
 
 }
 

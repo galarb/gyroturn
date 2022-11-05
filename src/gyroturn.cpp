@@ -1,21 +1,3 @@
-/*
-
-
-                   Robot Control function 
-								PID	Software Control for Arduino
-			      			 	 Using: Gyro MPU-6050
-                            LCD 16x2
-                            HC-06 Bluethooth
-                            LM298N Motor Driver
-                            hc-sr04 Ultrasonic module
-               
-      by Gal Arbel
-      2022
-
-
-*/
-
-
 #include "gyroturn.h"
 #include "Arduino.h"
 #include <Wire.h>
@@ -25,6 +7,8 @@
 #include "HardwareSerial.h"
 #include <SoftwareSerial.h>
 #include "clicli.h"
+#include <Adafruit_NeoPixel.h>
+#include "WString.h"
 
 unsigned long currentTime;
 unsigned long previousTime;
@@ -40,8 +24,7 @@ bool flag = true;
 int steps = 0;
 const byte rxPin = 11;
 const byte txPin = 13;
-const unsigned int MAX_MESSAGE_LENGTH = 64;
-String btcmd="";
+const unsigned int btMAX_MESSAGE_LENGTH = 64;
 long duration; // variable for the duration of sound wave travel
 int distance; // variable for the distance measurement
 
@@ -50,7 +33,7 @@ MPU6050 mpu;
 LiquidCrystal_I2C lcd(0x27,16,2);
 SoftwareSerial BTSerial(rxPin, txPin); // RX TX
 clicli mycli;  
-
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(29, 1, NEO_GRB + NEO_KHZ800);
 
 // uncomment "OUTPUT_READABLE_YAWPITCHROLL" if you want to see the yaw/
 // pitch/roll angles (in degrees) calculated from the quaternions coming
@@ -102,7 +85,21 @@ gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int s
  
 }
 
+void gyroturn::stripled (int lednum, int red, int green, int blue) {
+      strip.setPixelColor(lednum, strip.Color(red, green, blue));
+      strip.show();
+      strip.rainbow(0, 1, 255, 255, true);
+      delay(50);
+}
+void gyroturn::neopixels (int red, int green, int blue) {
+  for (int i = 0; i < 29; i++) {
+      strip.setPixelColor (i, strip.Color(red, green, blue));
+      strip.rainbow(0, 1, 255, 255, true);
 
+      strip.show();
+      delay(50);
+  }
+}
 void gyroturn::begin(int bdrate) {
    // join I2C bus (I2Cdev library doesn't do this automatically)
     #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
@@ -167,7 +164,7 @@ void gyroturn::begin(int bdrate) {
         Serial.print(F("DMP Initialization failed (code "));
         Serial.print(devStatus);
         Serial.println(F(")"));
-      
+     
     }
 
   lcd.init();  
@@ -193,6 +190,10 @@ void gyroturn::begin(int bdrate) {
   Serial.println(echoPin);
   Serial.print("Trig Pin = ");  
   Serial.println(trigPin);  
+  strip.begin();
+  strip.setBrightness(200); //(up to 255)
+  strip.clear(); 
+  neopixels (255, 0, 0); 
   previousTime = millis(); //otherwise the first Itegral value will be very high
 }
 void gyroturn::goUltrasonic(int dis, int deg, int power, double KP, double KI, double KD){
@@ -200,6 +201,7 @@ void gyroturn::goUltrasonic(int dis, int deg, int power, double KP, double KI, d
   ki = KI; 
   kd = KD;
   int tempdis = getDis(); //input value
+  lcdusshow(tempdis, dis);
   int output = PIDcalc(tempdis, dis); //output value = the calculated error
   if (output < 0){// go forward at a calculated speed (affected by the error)
     int powerR = power - abs(output);
@@ -382,7 +384,7 @@ void gyroturn::goencoder(int clicks, double KP, double KI, double KD){
   }  
 }
 int gyroturn::getSteps(){
-  if(digitalRead(encoderPin)){
+  if(digitalRead(encoderPin)){ //1 = obstruction, 0 = hole
      steps = steps +1;
      Serial.print("steps =");
      Serial.println(steps);
@@ -461,6 +463,18 @@ void gyroturn::lcdershow(int s, int e, int g){ //setpoint, error, gyro
   lcd.setCursor(11,1);
   lcd.print(g); 
 }
+
+void gyroturn::lcdusshow(int d, int s){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Distance | SetP");
+  lcd.setCursor(1,1);
+  lcd.print(d);  
+  lcd.setCursor(9,1);
+  lcd.print("|");  
+  lcd.setCursor(11,1);
+  lcd.print(s);   
+  }
 void gyroturn::printg(char dirR, char dirL, int speedR, int speedL){
   Serial.println("-------------------------------------");
   Serial.println("               | Direction |  Speed");
@@ -480,61 +494,53 @@ void gyroturn::btcheck(bool onoff){
     btdata = Serial.read();
     BTSerial.write(btdata);
   }*/
-  while(BTSerial.available()) {
-    char message[MAX_MESSAGE_LENGTH];
-    static unsigned int message_pos = 0;
-  //    char btdata = BTSerial.read();
-    btcmd +=(char)BTSerial.read();
-    
-  /* if ( btdata != '\n' && (message_pos < MAX_MESSAGE_LENGTH - 1) )
-     {
-     message[message_pos] = btdata;  //Add the incoming byte to our message
-     message_pos++;
+  while(BTSerial.available() > 0) {
+    char btmessage[btMAX_MESSAGE_LENGTH];
+    static unsigned int btmessage_pos = 0;
+    char btcmd = (char)BTSerial.read();
+    if (btcmd != '\n' && (btmessage_pos < btMAX_MESSAGE_LENGTH - 1)){
+     btmessage[btmessage_pos] = btcmd;  //Add the incoming byte to our message
+     btmessage_pos++;
      }
      //Full message received...
-     else
-     {
-      message[message_pos] = '\0';     //Add null character to string
-      Serial.println(message);     //echo the message to terminal
-        /*
-      int command[4];
+    else {
+      btmessage[btmessage_pos] = '\0';     //Add null character to string
+      Serial.println(btmessage);     //echo the message to terminal
+        
+      int btcommand[4];
       int argindex = 0;
-      char cmd;
+      char cmd_bt;
       char delim[] = " ";
-	     char tmpmsg[MAX_MESSAGE_LENGTH];
-       strcpy(tmpmsg,message);
-       message_pos = 0;
-       message[message_pos] = '\0';     //Add null character to string
+	    char bttmpmsg[btMAX_MESSAGE_LENGTH];
+      strcpy(bttmpmsg,btmessage);
+      btmessage_pos = 0;
+      btmessage[btmessage_pos] = '\0';     //Add null character to string
 
-        char *ptr = strtok(tmpmsg, delim);
-	      while(ptr != NULL)
-	       {
-          if (argindex == 0) {
-            cmd = ptr[0];
+      char *ptr = strtok(bttmpmsg, delim);
+	    while(ptr != NULL) {
+        if (argindex == 0) {
+          cmd_bt = ptr[0];
           }
-          command[argindex] = atoi(ptr);   
-          Serial.println(command[argindex]);
-          argindex++;  
-		      ptr = strtok(NULL, delim);
-	       } 
+        btcommand[argindex] = atoi(ptr);   
+        Serial.println(btcommand[argindex]);
+        argindex++;  
+		    ptr = strtok(NULL, delim);
+	    } 
+      switch (cmd_bt) {
 
-    switch (cmd) {
-
-      case 't': // testing
+       case 'T': // testing
          
         Serial.print(" testing"); 
         delay(1000);
         break;
        
-       message_pos = 0;     //Reset for the next message
+       btmessage_pos = 0;     //Reset for the next message
 
-    }*/
-   if(btcmd!=""){
-    Serial.print("Command recieved : ");
-    Serial.println(btcmd);
-    }
+      }
+  
+     }
   }
- 
- mycli.run();
-
+  mycli.run();
+  
 }
+

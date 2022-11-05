@@ -1,3 +1,20 @@
+/**************************************************************************
+
+            Robot Control software package for Arduino
+						Featuring my very own	PID	Control
+			      			 	 Using: Gyro MPU-6050
+                            LCD 16x2
+                            HC-06 Bluethooth
+                            LM298N Motor Driver
+                            hc-sr04 Ultrasonic module
+                            LM393 Optical encoder
+               
+      by Gal Arbel
+      2022
+
+
+****************************************************************************/
+
 #ifndef GYROTURN_H
 #define GYROTURN_H
  
@@ -5,6 +22,7 @@
   private:
    void lcdershow(int e, int g, int s); //show error 
    void lcdenshow(int c, int o, int t); //show encoder 
+   void lcdusshow(int d, int s); //show Ultrasonic 
    void spin(int output);
    void right(int speedR, int speedL);
    void left(int speeR, int speedL);
@@ -36,6 +54,8 @@
    void goencoder(int clicks, double KP, double KI, double KD);
    void btcheck(bool onoff);
    void goUltrasonic(int dis, int deg, int power, double KP, double KI, double KD);
-   
+   void stripled (int lednum, int red, int green, int blue);
+   void neopixels (int red, int green, int blue);
+
  };
 #endif 
