@@ -6,7 +6,6 @@
 #include "LiquidCrystal_I2C.h"
 #include "HardwareSerial.h"
 #include <SoftwareSerial.h>
-#include "clicli.h"
 #include <Adafruit_NeoPixel.h>
 #include "WString.h"
 
@@ -20,6 +19,7 @@ double cumError, rateError;
 double kp = 0;
 double ki = 0; 
 double kd = 0;
+int setcolor = 127; //default value for 50% white 50% Black
 bool flag = true;
 int steps = 0;
 const byte rxPin = 11;
@@ -27,12 +27,13 @@ const byte txPin = 13;
 const unsigned int btMAX_MESSAGE_LENGTH = 64;
 long duration; // variable for the duration of sound wave travel
 int distance; // variable for the distance measurement
+int color = 0;
+String cmd="";
 
 
 MPU6050 mpu;
 LiquidCrystal_I2C lcd(0x27,16,2);
 SoftwareSerial BTSerial(rxPin, txPin); // RX TX
-clicli mycli;  
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(29, 1, NEO_GRB + NEO_KHZ800);
 
 // uncomment "OUTPUT_READABLE_YAWPITCHROLL" if you want to see the yaw/
@@ -63,7 +64,7 @@ float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gra
 
 
 
-gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int speedL, int encodPin, int TrigPin, int EchoPin) {
+gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int speedL, int encodPin, int TrigPin, int EchoPin, int LineSensorPin) {
   in1 = dirRA;
   in2 = dirRB;
   in3 = dirLA;
@@ -73,6 +74,7 @@ gyroturn::gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int s
   encoderPin = encodPin;
   trigPin = TrigPin;
   echoPin = EchoPin;
+  lineSensorPin = LineSensorPin;
   pinMode(in1, OUTPUT);
   pinMode(in2, OUTPUT);
   pinMode(in3, OUTPUT);
@@ -108,7 +110,6 @@ void gyroturn::begin(int bdrate) {
     #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
         Fastwire::setup(400, true);
     #endif
-    mycli.begin();
 
     Serial.begin(bdrate);
     BTSerial.begin(bdrate);
@@ -287,6 +288,52 @@ void gyroturn::gotoang(int deg, int timer,  double KP, double KI, double KD) {
  }
 }
 
+int gyroturn::goline(int Setcolor, int power, double KP, double KI, double KD){
+  kp = KP;
+  ki = KI; 
+  kd = KD;
+  setcolor = Setcolor;
+  int tempcolor = getColor(); //input value
+  int output = PIDcalc(tempcolor, setcolor); //output value, the calculated error
+  lcdcolorshow(output, tempcolor, setcolor);
+  delay(30);
+  if (output > 0){  // 
+   fwd(output, output);
+  }
+  if (output < 0){  // 
+   stop();
+  }  
+   if (output > 0){// brighter than setpoint, correct left
+    int powerR = power + output;
+    int powerL = power - output;
+    if (powerL < 0) {
+      powerL = 0; 
+      }
+    if (powerR > 255) {
+      powerR = 255;
+      }
+    //printg('F', 'F', powerR, powerL);
+    fwd(powerR, powerL);
+  }
+ else if (output < 0){//darker than setpoint, correct right  
+  int powerR = power - abs(output);
+  int powerL = power + abs(output);
+  if (powerL > 255) {
+    powerL = 255;
+    }
+  if (powerR < 0) {
+    powerR = 0;
+    }
+     // printg('F', 'F', powerR, powerL);
+    fwd(powerR, powerL);
+  }
+ else if(!output) {//go straight
+    fwd(power, power);
+   // Serial.println("going FWD");
+
+  }
+}
+
 double gyroturn::PIDcalc(double inp, int sp){
    currentTime = millis();                //get current time
    elapsedTime = (double)(currentTime - previousTime)/1000; //compute time elapsed from previous computation (60ms approx). divide in 1000 to get in Sec
@@ -296,13 +343,13 @@ double gyroturn::PIDcalc(double inp, int sp){
    cumError += error * elapsedTime;                   // compute integral
    rateError = (error - lastError)/elapsedTime;       // compute derivative deltaError/deltaTime
    double out = kp*error + ki*cumError + kd*rateError; //PID output               
-   Serial.println(cumError);
+   //Serial.println(cumError);
    lastError = error;                                 //remember current error
    previousTime = currentTime;                        //remember current time
    if(out > 254){out = 254;}    //limit the function for smoother operation
    if(out < -254){out = -254;}
    if(cumError > 255 || cumError < -255){cumError = 0; out = 0;} // reset the Integral commulator
-   if(!error){cumError = 0; out = 0;}             // reset the Integral commulator
+   if(rateError < 0.3 || rateError > -0.3){cumError = 0;}             // reset the Integral commulator
    return out;                                        //the function returns the PID output value 
   
 }
@@ -386,13 +433,17 @@ void gyroturn::goencoder(int clicks, double KP, double KI, double KD){
 int gyroturn::getSteps(){
   if(digitalRead(encoderPin)){ //1 = obstruction, 0 = hole
      steps = steps +1;
-     Serial.print("steps =");
+     ("steps =");
      Serial.println(steps);
      while(digitalRead(encoderPin));
    }
   return steps;
 }
-
+int gyroturn::getColor(){
+  color = analogRead(lineSensorPin);
+  color = map(color, 0, 1024, 0, 255);
+  return color;
+}
 int gyroturn::getDis(){
   digitalWrite(trigPin, LOW); //clears the US conditions
   delayMicroseconds(2);
@@ -487,60 +538,91 @@ void gyroturn::printg(char dirR, char dirL, int speedR, int speedL){
   Serial.print("      |  ");
   Serial.println(speedL);
 }
-
-void gyroturn::btcheck(bool onoff){
+void gyroturn::lcdcolorshow(int e, int c, int s){
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("SP | PID |Color");
+  lcd.setCursor(0,1);
+  lcd.print(s);  
+  lcd.setCursor(3,1);
+  lcd.print("|"); 
+  lcd.setCursor(5,1);
+  lcd.print(e); 
+  lcd.setCursor(9,1);
+  lcd.print("|");  
+  lcd.setCursor(11,1);
+  lcd.print(c); 
+}
+void gyroturn::btcheck(){
+ char btmessage[btMAX_MESSAGE_LENGTH]; //char array to store the full message
+ static unsigned int btmessage_pos = 0;
+ char btByte;  //stores a single character
+ while(BTSerial.available() > 0) {
+  btByte = BTSerial.read();
+  if (btByte != '\n' && (btmessage_pos < btMAX_MESSAGE_LENGTH - 1)){
+   btmessage[btmessage_pos] = btByte;  //Add the incoming byte to our message
+   btmessage_pos++;
+   }
+     //Full message received...     
+  else {
+   btmessage[btmessage_pos] = '\0';     //Add null character to string
+   Serial.write(btmessage);     //echo the message to terminal
     
- /* while(Serial.available()){
-    btdata = Serial.read();
-    BTSerial.write(btdata);
-  }*/
-  while(BTSerial.available() > 0) {
-    char btmessage[btMAX_MESSAGE_LENGTH];
-    static unsigned int btmessage_pos = 0;
-    char btcmd = (char)BTSerial.read();
-    if (btcmd != '\n' && (btmessage_pos < btMAX_MESSAGE_LENGTH - 1)){
-     btmessage[btmessage_pos] = btcmd;  //Add the incoming byte to our message
-     btmessage_pos++;
-     }
-     //Full message received...
-    else {
-      btmessage[btmessage_pos] = '\0';     //Add null character to string
-      Serial.println(btmessage);     //echo the message to terminal
-        
-      int btcommand[4];
-      int argindex = 0;
-      char cmd_bt;
-      char delim[] = " ";
-	    char bttmpmsg[btMAX_MESSAGE_LENGTH];
-      strcpy(bttmpmsg,btmessage);
-      btmessage_pos = 0;
-      btmessage[btmessage_pos] = '\0';     //Add null character to string
+    int btcommand[5];
+    int argindex = 0;
+    char cmd_bt;
+    char delim[] = " ";
+    char bttmpmsg[btMAX_MESSAGE_LENGTH];
+    strcpy(bttmpmsg,btmessage);
+    btmessage_pos = 0;
+    btmessage[btmessage_pos] = '\0';     //Add null character to string
 
-      char *ptr = strtok(bttmpmsg, delim);
-	    while(ptr != NULL) {
-        if (argindex == 0) {
-          cmd_bt = ptr[0];
-          }
-        btcommand[argindex] = atoi(ptr);   
-        Serial.println(btcommand[argindex]);
-        argindex++;  
-		    ptr = strtok(NULL, delim);
-	    } 
-      switch (cmd_bt) {
+    char *ptr = strtok(bttmpmsg, delim);
+    while(ptr != NULL) {
+      if (argindex == 0) {
+        cmd_bt = ptr[0];
+        }
+      btcommand[argindex] = atoi(ptr);   
+      Serial.println(btcommand[argindex]);
+      argindex++;  
+      ptr = strtok(NULL, delim);
+    } 
+    switch (cmd_bt) {
 
-       case 'T': // testing
-         
-        Serial.print(" testing"); 
-        delay(1000);
+      case 's': 
+        printbt("Steer", btcommand[1], btcommand[2], btcommand[3], btcommand[4], btcommand[5]); 
+        steer(btcommand[1], btcommand[2], btcommand[3], btcommand[4], btcommand[5]);
+        delay(30);
         break;
-       
-       btmessage_pos = 0;     //Reset for the next message
+      
+      case 'a': // go to angle
+        printbt("Angle", btcommand[2], btcommand[1], btcommand[3], btcommand[4], btcommand[5]); 
+        delay(100);
+        gotoang(btcommand[1], btcommand[2],  btcommand[3], btcommand[4], btcommand[5]);
+        break;      
+        
+      btmessage_pos = 0;     //Reset for the next message
 
-      }
-  
-     }
-  }
-  mycli.run();
-  
+    }
+  }  
+ }
 }
 
+void gyroturn::printbt(String command, int par1, int par2, int par3, int par4, int par5){
+  Serial.println("-----------------------------------------------");
+  Serial.println(" Command  | S/T   | Direction | P  |  I  |  D  |");
+    Serial.print(" ");
+    Serial.print(command);
+    Serial.print       ("    |  ");
+  Serial.print(par1);
+  Serial.print                       ("  |    ");
+  Serial.print(par2);
+  Serial.print                          ("     | ");
+  Serial.print(par3);
+  Serial.print                                   ("  |  ");
+  Serial.print(par4);
+  Serial.print                                    ("  |  ");
+  Serial.print(par5);
+  Serial.println                                    ("  |  ");
+
+}

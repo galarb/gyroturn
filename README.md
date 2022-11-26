@@ -1,13 +1,14 @@
 # Robot PID control function
 
-This Library provides a simple PID control function for Robot control (using Gyro, Ultrasonic, Optical Ecoder, as inputs to the PID)
+This Library provides a simple PID control function for Robot control (using Gyro, Ultrasonic, Optical Ecoder, Line tracking sensor, as inputs to the PID)
  
-Supports HC-06 Bloutooth module with Clicli embedded (see github.com/galarb/clicli)
+Supports HC-06 Bloutooth module with Clicli embedded (see github.com/galarb/clicli). Currently Clicli they do not work together. (bug which I could not solve yet)
 
 Class Functionalities:
-- the Object constructor, gyroturn() expects the following integers: in1-4, enA (L Motor) and enB (R Motor), pin for encoder sensor, Echo and Trig
+- the Object constructor, gyroturn() expects the following integers: in1-4, enA (L Motor) and enB (R Motor), pin for encoder sensor, Echo and Trig, Line tracking Analog Pin
 Note: enA and enB must be PWM pins!
 these correspond to L298N motor driver pins for direction and speed control.
+note that pins 11 and 13 are reserved for the BT module. rxPin = 11, and txPin = 13
 
 - void begin(bdrate) is used to initiate the serial monitor at the specified baud rate.
 Bluethooth is also started at the same baud rate.
@@ -20,8 +21,8 @@ Bluethooth is also started at the same baud rate.
 
 
 HMI:
-LCD support, showing the error and the current Gyro location as well as the Setpoint
-Serial Print with the motors speed and direction, currently suppressed.
+LCD support, showing the error, Setpoint and current readings of various functions.
+Bluetooth commands via similar interface as Clicli.
 
 PID control:
 In the Current Version full P, I and D are implemented (Kp = 2, Ki=2, Kd=20).
