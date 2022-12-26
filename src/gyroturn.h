@@ -10,10 +10,12 @@
                             hc-sr04 Ultrasonic module
                             LM393 Optical encoder
                             Reflected light Sensor (line tracking)
+                            NRF24L01 Radio (NOTE: Must have capacitor soldered on VCC/GND)
                
       by Gal Arbel
-      2022
-
+      2022-2023
+      
+ NRF24L01 connected to default SPI pins (CLK, MISO, MOSI = 13, 12, 11) and pins 9, 10 (CE, CSN)
 
 ****************************************************************************/
 
@@ -46,7 +48,7 @@
 
   public:
    gyroturn(int dirRA, int dirRB, int dirLA, int dirLB, int speedR, int speedL, int encodPin, int TrigPin, int EchoPin, int LineSensorPin);
-   void begin(int bdrate); //will start both Bluetooth and Serial at this Baud rate
+   void begin(double bdrate); //will start both Bluetooth and Serial at this Baud rate
    void gotoang(int deg, int timer, double KP, double KI, double KD); //turn to a setpoint (angle), for #of correctios
    int getYaw(); //return the Yaw angle
    int getDis(); //return the Ultrasonic distance
@@ -61,9 +63,12 @@
    void goencoder(int clicks, double KP, double KI, double KD);
    int goline(int Setcolor, int power, double KP, double KI, double KD);
    void btcheck();
+   void joystickRadioCheck();
    void goUltrasonic(int dis, int deg, int power, double KP, double KI, double KD);
    void stripled (int lednum, int red, int green, int blue);
    void neopixels (int red, int green, int blue);
+   void joystickradio(bool onof);
+   void printjoycommand(int par1, int par2, int par3, int par4);
 
  };
 #endif 

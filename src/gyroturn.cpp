@@ -8,6 +8,9 @@
 #include <SoftwareSerial.h>
 #include <Adafruit_NeoPixel.h>
 #include "WString.h"
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
 
 unsigned long currentTime;
 unsigned long previousTime;
@@ -22,19 +25,25 @@ double kd = 0;
 int setcolor = 127; //default value for 50% white 50% Black
 bool flag = true;
 int steps = 0;
-const byte rxPin = 11;
-const byte txPin = 13;
+//const byte rxPin = 11;
+//const byte txPin = 13;
 const unsigned int btMAX_MESSAGE_LENGTH = 64;
 long duration; // variable for the duration of sound wave travel
 int distance; // variable for the distance measurement
 int color = 0;
 String cmd="";
-
+const byte address[6] = "00001";
+int direction = 0;
+int speed = 0;
+bool btn1 = 0;
+bool btn2 = 0;
+int control[5]; 
 
 MPU6050 mpu;
 LiquidCrystal_I2C lcd(0x27,16,2);
-SoftwareSerial BTSerial(rxPin, txPin); // RX TX
+//SoftwareSerial BTSerial(rxPin, txPin); // RX TX
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(29, 1, NEO_GRB + NEO_KHZ800);
+RF24 radio(9,10);  // CE, CSN. Default SPI Pins: CLK, MISO, MOSI = 13, 12, 11
 
 // uncomment "OUTPUT_READABLE_YAWPITCHROLL" if you want to see the yaw/
 // pitch/roll angles (in degrees) calculated from the quaternions coming
@@ -102,7 +111,38 @@ void gyroturn::neopixels (int red, int green, int blue) {
       delay(50);
   }
 }
-void gyroturn::begin(int bdrate) {
+void gyroturn::joystickRadioCheck(){
+  if (radio.available()) {   // If the NRF240L01 module received data
+    radio.read(&control, sizeof(control));
+    direction = control[0];
+    speed = control[1];
+    btn1 = control[2];
+    btn2 = control[3];
+    printjoycommand(direction, speed, btn1, btn2);
+    //steer(direction, speed, 1, 2, 0);
+  }
+  
+  else {Serial.println("no radio available");}
+  
+}
+
+void gyroturn::joystickradio(bool onof){
+  if(onof){
+    if (!radio.begin()) {
+      Serial.println(F("radio hardware not responding!"));
+      while (1) {} // hold program in infinite loop to prevent subsequent errors
+   }
+    Serial.println("Receiver Srarted");
+    radio.openReadingPipe(0, address);
+    radio.setPALevel(RF24_PA_MIN);
+    radio.startListening();
+    //Serial.println("Radio Details:");
+    //radio.printDetails();
+  }
+}
+void gyroturn::begin(double bdrate) {
+    Serial.begin(bdrate);
+
    // join I2C bus (I2Cdev library doesn't do this automatically)
     #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
         Wire.begin();
@@ -111,10 +151,8 @@ void gyroturn::begin(int bdrate) {
         Fastwire::setup(400, true);
     #endif
 
-    Serial.begin(bdrate);
-    BTSerial.begin(bdrate);
 
-    //  while (!Serial); // wait for Leonardo enumeration, others continue immediately
+   // BTSerial.begin(bdrate);
 
     // initialize device
     Serial.println(F("Initializing I2C devices..."));
@@ -171,7 +209,7 @@ void gyroturn::begin(int bdrate) {
   lcd.init();  
   lcd.backlight();
   lcd.setCursor(3,0);
-  lcd.print("Started");
+  lcd.print("Started - OK");
   
   Serial.print("in1 = ");  
   Serial.println(in1);
@@ -196,6 +234,7 @@ void gyroturn::begin(int bdrate) {
   strip.clear(); 
   neopixels (255, 0, 0); 
   previousTime = millis(); //otherwise the first Itegral value will be very high
+  
 }
 void gyroturn::goUltrasonic(int dis, int deg, int power, double KP, double KI, double KD){
   kp = KP;
@@ -553,7 +592,7 @@ void gyroturn::lcdcolorshow(int e, int c, int s){
   lcd.setCursor(11,1);
   lcd.print(c); 
 }
-void gyroturn::btcheck(){
+/*void gyroturn::btcheck(){
  char btmessage[btMAX_MESSAGE_LENGTH]; //char array to store the full message
  static unsigned int btmessage_pos = 0;
  char btByte;  //stores a single character
@@ -606,6 +645,22 @@ void gyroturn::btcheck(){
     }
   }  
  }
+}
+*/
+
+void gyroturn::printjoycommand(int par1, int par2, int par3, int par4){
+  Serial.println("-----------------------------------------------");
+  Serial.println(" direcion  | speed   | buttonRight | buttonLeft  |");
+    Serial.print(" ");
+    Serial.print(par1);
+    Serial.print       ("         |  ");
+  Serial.print(par2);
+  Serial.print                       ("      |  ");
+  Serial.print(par3);
+  Serial.print                          ("        |  ");
+  Serial.print(par4);
+  Serial.println                                   ("    |  ");
+  
 }
 
 void gyroturn::printbt(String command, int par1, int par2, int par3, int par4, int par5){

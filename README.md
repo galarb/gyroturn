@@ -23,6 +23,7 @@ Bluethooth is also started at the same baud rate.
 HMI:
 LCD support, showing the error, Setpoint and current readings of various functions.
 Bluetooth commands via similar interface as Clicli.
+NRF24L01 radio communications with Joystick
 
 PID control:
-In the Current Version full P, I and D are implemented (Kp = 2, Ki=2, Kd=20).
+In the Current Version full P, I and D are implemented (Kp = 1, Ki=2, Kd=0).
